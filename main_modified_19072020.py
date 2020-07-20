@@ -38,7 +38,7 @@ HOSTNAME = socket.gethostname()
 IPADDRESS = socket.gethostbyname(HOSTNAME)
 MQTT_HOST = IPADDRESS
 MQTT_PORT = 3001
-MQTT_KEEPALIVE_INTERVAL = 60
+MQTT_KEEPALIVE_INTERVAL = 120
 
 
 def build_argparser():
@@ -91,8 +91,6 @@ def infer_on_stream(args, client):
     :return: None
     """
     
-    model="/home/workspace/models/person-detection-retail-0013.xml"
-    
     request_id = 0
     current_person_duration = 0
     previous_person_duration = 0
@@ -100,22 +98,20 @@ def infer_on_stream(args, client):
     
     current_detection_counter = 0
     previous_detection_counter = 0 
-       
     
+    frame_time = 0
+    frame_counter = 0
     
     # Initialise the class
     infer_network = Network()
-    
     
     # Set Probability threshold for detections
     prob_threshold = args.prob_threshold
 
     ### Loading the model through infer_network's load_model method ###
-
-    infer_network.load_model(model, args.device, args.cpu_extension)
+    infer_network.load_model(args.model, args.device, args.cpu_extension)
     
     ### Getting network input shape ###
-    
     net_input_shape = infer_network.get_input_shape()
     
     ### Check if the input stream is webcam or an image file or a video file ### 
@@ -123,30 +119,19 @@ def infer_on_stream(args, client):
     
     if args.input == "CAM":
         input_type = 0
-        source_mode = "WebCam"
-                
+        source_mode = "WebCam"                
     elif args.input.endswith('.bmp') or args.input.endswith('.jpg') or args.input.endswith('.png'): 
         input_type = args.input
-        source_mode = "Image"
-                
+        source_mode = "Image"                
     elif args.input.endswith('.mp4'):
         input_type = args.input
         source_mode = "Video"
-        
     else: 
         exit()
         
        
     ### Handling the input stream ###
-
     vid_cap = cv2.VideoCapture(args.input)
-    
-    ##isVideoOpened = vid_cap.isOpened(args.input) 
-    
-    ##if not isVideoOpened: 
-    ##    print("Opps! Not Able To Open Input Source")
-        
-           
     
     vid_cap.open(args.input)
     
@@ -154,106 +139,101 @@ def infer_on_stream(args, client):
     input_height = int(vid_cap.get(4))
     
     ### Looping until video stream is completely over ###
-        
     while vid_cap.isOpened():
         
         ### Reading frame from the video capture ###
-        
         flag, vid_frame = vid_cap.read()
         
         if not flag: 
             break
         key_pressed = cv2.waitKey(60)
         
+        frame_counter = frame_counter + 1
+        ftime = time.time()
+        
         ### Pre-processing the image as needed by the model ###
                
         ### Resizing the picture frame ###
         picture_frame = cv2.resize(vid_frame, (net_input_shape[3], net_input_shape[2]))
         
-        ##print('Resizing done..!')
-        
         ### Transposing the  picture frame ###
         picture_frame = picture_frame.transpose(2,0,1)
         
-        ##print('Transposing done..!')
-        
         ### Reshaping the picture frame ###
         picture_frame = picture_frame.reshape(1, *picture_frame.shape)
-          
-        
             
         ### Starting asynchronous inference for specified request number ###
-        
         inference_start_time = time.time()
-        ##print(inference_start_time)
-        
-        
-        
-        
         infer_network.exec_net(picture_frame, request_id)    
         
         ### Waiting for the inference result ###
-        
         if infer_network.wait() == 0:
         
             ### Getting the results of the inference request ###
             inference_end_time = time.time()
+            person_detection_time = inference_end_time - inference_start_time
+            
+            inf_time_message = "Inference Time: {:.3f}ms".format(person_detection_time * 1000) 
+            
+            #inf_time_message = total_persons_detected 
+            cv2.putText(vid_frame, inf_time_message, (15, 15), cv2.FONT_HERSHEY_COMPLEX, 0.5, (255, 0, 0), 1)
+            
             infer_result = infer_network.get_output()
                             
             ### TODO: Extract any desired stats from the results ###
+            conf = infer_result[0, 0, :, 2]
             
-            for item in infer_result[0][0]:
+            current_detection_counter = 0
+            
+            for i, c in enumerate(conf):
                 
-                if item[2] > prob_threshold: 
-                    min_x = int(item[3]* input_width)
-                    max_x = int(item[5]* input_width)
-                    min_y = int(item[4]* input_height)
-                    max_y = int(item[6]* input_height)
-                    vid_frame = cv2.rectangle(picture_frame, (min_x, min_y),(max_x, max_y), (0,255,255), 1)
+                if c > prob_threshold: 
+                    rect_box = infer_result[0, 0, i, 3:]
+                    min_x = int(rect_box[0] * input_width)
+                    min_y = int(rect_box[1] * input_height)
+                    max_x = int(rect_box[2] * input_width)
+                    max_y = int(rect_box[3] * input_height)
+                                       
+                    vid_frame = cv2.rectangle(vid_frame, (min_x, min_y), (max_x, max_y), (255,0, 0), 1)
+                                       
                     current_detection_counter = current_detection_counter + 1
-                    log.info("Inference Time: {:3f}ms".format((inference_end_time - inference_start_time) * 1000))
-            
-            
-            
+                   
             if current_detection_counter > previous_detection_counter:
+                
                 current_person_start_time = time.time()
                 total_persons_detected = total_persons_detected + current_detection_counter - previous_detection_counter
                 client.publish('person', payload=json.dumps({'total': total_persons_detected}))
+
+                
                 
             if current_detection_counter < previous_detection_counter:
                 current_person_duration = time.time() - current_person_start_time
                 client.publish('person/duration', payload=json.dumps({'duration': current_person_duration}))
                 
             
+            frame_time = frame_time - time.time()
+            frames_per_second = frame_counter / float(frame_time)
+            fps_label = "FPS : {:.2f}".format(frames_per_second)
+            cv2.putText(vid_frame, fps_label,(25,100),cv2.FONT_HERSHEY_COMPLEX, 0.5,(255, 0, 0), 1)
+            
             ### TODO: Calculate and send relevant information on ###
             ### current_count, total_count and duration to the MQTT server ###
             ### Topic "person": keys of "count" and "total" ###
             ### Topic "person/duration": key of "duration" ###
             
-            client.publish('person', payload=json.dumps({'count': current_detection_counter}))
-            previous_detection_counter = current_detection_counter
             
+            previous_detection_counter = current_detection_counter
+            client.publish('person', payload=json.dumps({'count': current_detection_counter}))
+                       
                    
         ### TODO: Send the frame to the FFMPEG server ###
-        
-        vid_frame = cv2.resize(vid_frame,(768,432))
         sys.stdout.buffer.write(vid_frame)
         sys.stdout.flush()
         
-        ### TODO: Write an output image if `single_image_mode` ###
         
-        #if source_mode == "Image":
-        #    picture_frame = cv2.resize(vid_frame,(1980,1080))
-        #    cv2.imwrite("Generated_Image.jpg", picture_frame)
-        ##else:
-        ##  out.write(picture_frame)
-        
-        ### Releasing the capture 
-        ##if source_mode == "Video":
-        ##    out.release()
     vid_cap.release()
         
-        ### Destroying all CV2 Windows
+    ### Destroying all CV2 Windows
         
     cv2.destroyAllWindows()
        
