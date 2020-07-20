@@ -124,23 +124,19 @@ def infer_on_stream(args, client):
     if args.input == "CAM":
         input_type = 0
         source_mode = "WebCam"
-        print('Webcam')
-        
+                
     elif args.input.endswith('.bmp') or args.input.endswith('.jpg') or args.input.endswith('.png'): 
         input_type = args.input
         source_mode = "Image"
-        print('Image')
-        
+                
     elif args.input.endswith('.mp4'):
         input_type = args.input
         source_mode = "Video"
-        print('Video')
+        
     else: 
-        print("Opps! Given Input Is Not Supported..!")
         exit()
         
-    print(args.input)
-    
+       
     ### Handling the input stream ###
 
     vid_cap = cv2.VideoCapture(args.input)
@@ -158,9 +154,7 @@ def infer_on_stream(args, client):
     input_height = int(vid_cap.get(4))
     
     ### Looping until video stream is completely over ###
-    print(input_width)
-    print(input_height)
-    
+        
     while vid_cap.isOpened():
         
         ### Reading frame from the video capture ###
@@ -186,16 +180,16 @@ def infer_on_stream(args, client):
         ### Reshaping the picture frame ###
         picture_frame = picture_frame.reshape(1, *picture_frame.shape)
           
-        print('Reshaping done')    
+        
             
         ### Starting asynchronous inference for specified request number ###
         
         inference_start_time = time.time()
         ##print(inference_start_time)
         
-        print(inference_start_time)
         
-        print('Inference starting...!')
+        
+        
         infer_network.exec_net(picture_frame, request_id)    
         
         ### Waiting for the inference result ###
@@ -219,7 +213,7 @@ def infer_on_stream(args, client):
                     current_detection_counter = current_detection_counter + 1
                     log.info("Inference Time: {:3f}ms".format((inference_end_time - inference_start_time) * 1000))
             
-            print(current_detection_counter)
+            
             
             if current_detection_counter > previous_detection_counter:
                 current_person_start_time = time.time()
@@ -230,7 +224,7 @@ def infer_on_stream(args, client):
                 current_person_duration = time.time() - current_person_start_time
                 client.publish('person/duration', payload=json.dumps({'duration': current_person_duration}))
                 
-            print('Test')    
+            
             ### TODO: Calculate and send relevant information on ###
             ### current_count, total_count and duration to the MQTT server ###
             ### Topic "person": keys of "count" and "total" ###
@@ -271,7 +265,7 @@ def main():
 
     :return: None
     """
-    print('starting main ... !')
+    
     # Grab command line args
     args = build_argparser().parse_args()
     # Connect to the MQTT server
