@@ -73,7 +73,7 @@ def connect_mqtt():
     ### Connecting to the MQTT client ###
     
     client = None
-    client = mqtt.client()
+    client = mqtt.Client()
     client.connect(MQTT_HOST, MQTT_PORT, MQTT_KEEPALIVE_INTERVAL)
     
     ### Returning the MQTT Client ###
@@ -93,14 +93,15 @@ def infer_on_stream(args, client):
     
     model="/home/workspace/models/person-detection-retail-0013.xml"
     
-    reqeust_id = 0
+    request_id = 0
     current_person_duration = 0
     previous_person_duration = 0
     total_persons_detected = 0
-    rep = 0
+    
     current_detection_counter = 0
     previous_detection_counter = 0 
        
+    
     
     # Initialise the class
     infer_network = Network()
@@ -123,61 +124,78 @@ def infer_on_stream(args, client):
     if args.input == "CAM":
         input_type = 0
         source_mode = "WebCam"
+        print('Webcam')
         
     elif args.input.endswith('.bmp') or args.input.endswith('.jpg') or args.input.endswith('.png'): 
         input_type = args.input
         source_mode = "Image"
-    
+        print('Image')
+        
     elif args.input.endswith('.mp4'):
         input_type = args.input
         source_mode = "Video"
-    
+        print('Video')
     else: 
         print("Opps! Given Input Is Not Supported..!")
-        break
-            
+        exit()
+        
+    print(args.input)
+    
     ### Handling the input stream ###
 
-    vid_cap = cv2.VideoCapture(input_type)
+    vid_cap = cv2.VideoCapture(args.input)
     
-    isVideoOpened = vid_cap.isOpened(args.input) 
+    ##isVideoOpened = vid_cap.isOpened(args.input) 
     
-    if not isVideoOpened: 
-        print("Opps! Not Able To Open Input Source")
-        break
+    ##if not isVideoOpened: 
+    ##    print("Opps! Not Able To Open Input Source")
+        
            
-    if input_type: 
-        vid_cap.open(args.input)
+    
+    vid_cap.open(args.input)
     
     input_width = int(vid_cap.get(3))
     input_height = int(vid_cap.get(4))
     
     ### Looping until video stream is completely over ###
+    print(input_width)
+    print(input_height)
     
     while vid_cap.isOpened():
         
         ### Reading frame from the video capture ###
         
-        flag,vid_frame = vid_cap.read()
+        flag, vid_frame = vid_cap.read()
         
         if not flag: 
             break
-        key_pressed = cv2.waitkey(100)
+        key_pressed = cv2.waitKey(60)
         
         ### Pre-processing the image as needed by the model ###
                
         ### Resizing the picture frame ###
-        picture_frame = cv2.resize(vid_frame, (net_input_sharpe[3], net_input_shape[4]))
+        picture_frame = cv2.resize(vid_frame, (net_input_shape[3], net_input_shape[2]))
+        
+        ##print('Resizing done..!')
         
         ### Transposing the  picture frame ###
         picture_frame = picture_frame.transpose(2,0,1)
         
+        ##print('Transposing done..!')
+        
         ### Reshaping the picture frame ###
         picture_frame = picture_frame.reshape(1, *picture_frame.shape)
-                
+          
+        print('Reshaping done')    
+            
         ### Starting asynchronous inference for specified request number ###
         
         inference_start_time = time.time()
+        ##print(inference_start_time)
+        
+        print(inference_start_time)
+        
+        print('Inference starting...!')
         infer_network.exec_net(picture_frame, request_id)    
         
         ### Waiting for the inference result ###
@@ -197,9 +215,11 @@ def infer_on_stream(args, client):
                     max_x = int(item[5]* input_width)
                     min_y = int(item[4]* input_height)
                     max_y = int(item[6]* input_height)
-                    cv2.rectangle(picture_frame, (min_x,min_y),(max_x, max_y), (0,255,255), 1)
+                    vid_frame = cv2.rectangle(picture_frame, (min_x, min_y),(max_x, max_y), (0,255,255), 1)
                     current_detection_counter = current_detection_counter + 1
                     log.info("Inference Time: {:3f}ms".format((inference_end_time - inference_start_time) * 1000))
+            
+            print(current_detection_counter)
             
             if current_detection_counter > previous_detection_counter:
                 current_person_start_time = time.time()
@@ -208,9 +228,9 @@ def infer_on_stream(args, client):
                 
             if current_detection_counter < previous_detection_counter:
                 current_person_duration = time.time() - current_person_start_time
-                client.publish('person/duration', payload=json, dumps({'duration': current_person_duration}))
+                client.publish('person/duration', payload=json.dumps({'duration': current_person_duration}))
                 
-                
+            print('Test')    
             ### TODO: Calculate and send relevant information on ###
             ### current_count, total_count and duration to the MQTT server ###
             ### Topic "person": keys of "count" and "total" ###
@@ -219,30 +239,29 @@ def infer_on_stream(args, client):
             client.publish('person', payload=json.dumps({'count': current_detection_counter}))
             previous_detection_counter = current_detection_counter
             
-            
-            
+                   
         ### TODO: Send the frame to the FFMPEG server ###
         
-        picture_frame = cv2.resize(frame,(1980,1080))
-        sys.stdout.buffer.write(picture_frame)
+        vid_frame = cv2.resize(vid_frame,(768,432))
+        sys.stdout.buffer.write(vid_frame)
         sys.stdout.flush()
         
         ### TODO: Write an output image if `single_image_mode` ###
         
-        if source_mode == "Image":
-            picture_frame = cv2.resize(frame,(1980,1080))
-            cv2.imwrite("Generated_Image.jpg", picture_frame)
-        else
-            out.write(picture_frame)
+        #if source_mode == "Image":
+        #    picture_frame = cv2.resize(vid_frame,(1980,1080))
+        #    cv2.imwrite("Generated_Image.jpg", picture_frame)
+        ##else:
+        ##  out.write(picture_frame)
         
         ### Releasing the capture 
-        if source_mode == "Video"
-            out.release()
-        vid_cap.release()
+        ##if source_mode == "Video":
+        ##    out.release()
+    vid_cap.release()
         
         ### Destroying all CV2 Windows
         
-        cv2.destroyAllWindows()
+    cv2.destroyAllWindows()
        
         
             
@@ -252,6 +271,7 @@ def main():
 
     :return: None
     """
+    print('starting main ... !')
     # Grab command line args
     args = build_argparser().parse_args()
     # Connect to the MQTT server
